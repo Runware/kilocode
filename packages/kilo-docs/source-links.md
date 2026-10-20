@@ -11,6 +11,9 @@
   <!-- packages/opencode/src/plugin/digitalocean.ts -->
 - <https://api.kilo.ai>
   <!-- packages/opencode/src/cli/cmd/github.handler.ts -->
+- <https://api.runware.ai/v1>
+  <!-- packages/opencode/src/provider/model-cache.ts -->
+  <!-- packages/opencode/src/provider/models.ts -->
 - <https://api.x.ai/v1>
   <!-- packages/opencode/src/plugin/xai.ts -->
 - <https://app.kilo.ai>

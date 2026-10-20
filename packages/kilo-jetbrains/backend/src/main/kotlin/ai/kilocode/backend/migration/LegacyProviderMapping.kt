@@ -79,6 +79,7 @@ val PROVIDER_MAP: Map<String, ProviderMapping> = mapOf(
     "sap-ai-core" to ProviderMapping(id = "sap-ai-core", key = "sapAiCoreServiceKey", name = "SAP AI Core"),
     "synthetic" to ProviderMapping(id = "synthetic", key = "syntheticApiKey", name = "Synthetic"),
     "apertis" to ProviderMapping(id = "apertis", key = "apertisApiKey", name = "Apertis", modelField = "apertisModelId", urlField = "apertisBaseUrl"),
+    "runware" to ProviderMapping(id = "runware", key = "runwareApiKey", name = "Runware", modelField = "runwareModelId", urlField = "runwareBaseUrl"),
     "openai-codex" to ProviderMapping(id = "openai", key = "", name = "OpenAI (ChatGPT Plus/Pro)", oauthSecretKey = "openai-codex-oauth-credentials"),
     "nano-gpt" to ProviderMapping(id = "nano-gpt", key = "nanoGptApiKey", name = "NanoGPT", modelField = "nanoGptModelId"),
     "poe" to ProviderMapping(id = "poe", key = "poeApiKey", name = "Poe", modelField = "poeModelId"),

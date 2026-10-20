@@ -59,6 +59,25 @@ const APERTIS_BASE_URL = "https://api.apertis.ai/v1"
 const ApertisItem = Schema.Struct({ id: Schema.String, owned_by: Schema.optional(Schema.String) })
 const ApertisResponse = Schema.Struct({ data: Schema.optional(Schema.Array(ApertisItem)) })
 type ApertisItem = Schema.Schema.Type<typeof ApertisItem>
+const RUNWARE_BASE_URL = "https://api.runware.ai/v1"
+const RunwarePricing = Schema.Struct({
+  prompt: Schema.optional(Schema.String),
+  completion: Schema.optional(Schema.String),
+  input_cache_read: Schema.optional(Schema.String),
+})
+const RunwareItem = Schema.Struct({
+  id: Schema.String,
+  owned_by: Schema.optional(Schema.String),
+  name: Schema.optional(Schema.String),
+  context_length: Schema.optional(Schema.Finite),
+  max_output_tokens: Schema.optional(Schema.Finite),
+  input_modalities: Schema.optional(Schema.Array(Schema.String)),
+  output_modalities: Schema.optional(Schema.Array(Schema.String)),
+  pricing: Schema.optional(RunwarePricing),
+})
+const RunwareResponse = Schema.Struct({ data: Schema.optional(Schema.Array(RunwareItem)) })
+type RunwareItem = Schema.Schema.Type<typeof RunwareItem>
+const RUNWARE_MODALITIES = ["text", "audio", "image", "video", "pdf"] as const
 
 export const layer: Layer.Layer<
   Service,
@@ -100,6 +119,41 @@ export const layer: Layer.Layer<
       modalities: { input: ["text", "image"], output: ["text"] },
     })
 
+    const runwareModalities = (values: readonly string[] | undefined) =>
+      (values ?? []).filter((value): value is (typeof RUNWARE_MODALITIES)[number] =>
+        (RUNWARE_MODALITIES as readonly string[]).includes(value),
+      )
+
+    const runwarePrice = (value: string | undefined) => {
+      const parsed = Number(value)
+      return Number.isFinite(parsed) ? parsed * 1_000_000 : 0
+    }
+
+    const runware = (item: RunwareItem): Models[string] => {
+      const input = runwareModalities(item.input_modalities)
+      const output = runwareModalities(item.output_modalities)
+      return {
+        id: item.id,
+        name: item.name ?? item.id,
+        family: item.owned_by ?? "",
+        release_date: "",
+        attachment: input.some((modality) => modality !== "text"),
+        reasoning: false,
+        temperature: true,
+        tool_call: true,
+        cost: {
+          input: runwarePrice(item.pricing?.prompt),
+          output: runwarePrice(item.pricing?.completion),
+          cache_read: runwarePrice(item.pricing?.input_cache_read),
+        },
+        limit: { context: item.context_length ?? 128000, output: item.max_output_tokens ?? 4096 },
+        modalities: {
+          input: input.length > 0 ? input : ["text"],
+          output: output.length > 0 ? output : ["text"],
+        },
+      }
+    }
+
     const fetchApertisModels = Effect.fn("ModelCache.fetchApertisModels")(function* (options: Options) {
       const baseURL = options.baseURL ?? APERTIS_BASE_URL
       if (!options.apiKey) {
@@ -123,8 +177,31 @@ export const layer: Layer.Layer<
       return Object.fromEntries((json.data ?? []).map((item) => [item.id, aperture(item)]))
     })
 
+    const fetchRunwareModels = Effect.fn("ModelCache.fetchRunwareModels")(function* (options: Options) {
+      const baseURL = options.baseURL ?? RUNWARE_BASE_URL
+      if (!options.apiKey) {
+        log.debug("no API key for runware, skipping model fetch")
+        return {}
+      }
+
+      const url = `${baseURL.replace(/\/+$/, "")}/models`
+      const response = yield* HttpClientRequest.get(url).pipe(
+        HttpClientRequest.acceptJson,
+        HttpClientRequest.bearerToken(options.apiKey),
+        http.execute,
+        Effect.timeout("10 seconds"),
+      )
+      if (response.status < 200 || response.status >= 300) {
+        log.error("runware model fetch failed", { status: response.status })
+        return {}
+      }
+
+      const json = yield* HttpClientResponse.schemaBodyJson(RunwareResponse)(response)
+      return Object.fromEntries((json.data ?? []).map((item) => [item.id, runware(item)]))
+    })
+
     const authOptions = Effect.fn("ModelCache.authOptions")(function* (providerID: string) {
-      if (providerID !== "kilo" && providerID !== "apertis") return {}
+      if (providerID !== "kilo" && providerID !== "apertis" && providerID !== "runware") return {}
       const config = yield* cfg.get()
       const options: Options = {}
 
@@ -156,12 +233,29 @@ export const layer: Layer.Layer<
         })
       }
 
+      if (providerID === "runware") {
+        const item = config.provider?.[providerID]
+        if (item?.options?.apiKey) options.apiKey = item.options.apiKey
+        if (item?.options?.baseURL) options.baseURL = item.options.baseURL
+
+        const info = yield* auth.get(providerID)
+        if (info?.type === "api") options.apiKey = info.key
+        if (process.env.RUNWARE_API_KEY) options.apiKey = process.env.RUNWARE_API_KEY
+        if (process.env.RUNWARE_BASE_URL) options.baseURL = process.env.RUNWARE_BASE_URL
+        log.debug("runware auth options resolved", {
+          providerID,
+          hasKey: !!options.apiKey,
+          hasBaseURL: !!options.baseURL,
+        })
+      }
+
       return options
     })
 
     const fetchModels = (providerID: string, options: Options): Effect.Effect<Result, unknown> => {
       if (providerID === "kilo") return kilo.fetch(options)
       if (providerID === "apertis") return fetchApertisModels(options).pipe(Effect.map((models) => ({ models })))
+      if (providerID === "runware") return fetchRunwareModels(options).pipe(Effect.map((models) => ({ models })))
       log.debug("provider not implemented", { providerID })
       return Effect.succeed({ models: {} })
     }
@@ -188,6 +282,7 @@ export const layer: Layer.Layer<
         return JSON.stringify([providerID, options?.baseURL, options?.kilocodeOrganizationId, options?.kilocodeToken])
       }
       if (providerID === "apertis") return JSON.stringify([providerID, options?.baseURL, options?.apiKey])
+      if (providerID === "runware") return JSON.stringify([providerID, options?.baseURL, options?.apiKey])
       return providerID
     }
 
