@@ -73,8 +73,28 @@ export const layer: Layer.Layer<Service, never, Core.Service | Config.Service | 
             yield* cache.refresh("apertis", aptOpts).pipe(Effect.ignore, Effect.forkDetach)
         })
 
+        const rw = cfg.provider?.runware?.options
+        const rwURL = rw?.baseURL ?? "https://api.runware.ai/v1"
+        const rwOpts = rw?.baseURL ? { baseURL: rw.baseURL } : {}
+
+        const addRunware = Effect.fnUntraced(function* () {
+          if (providers.runware) return
+          const models = yield* cache.fetch("runware", rwOpts).pipe(Effect.catch(() => Effect.succeed({})))
+          providers.runware = {
+            id: "runware",
+            name: "Runware",
+            env: ["RUNWARE_API_KEY"],
+            api: rwURL,
+            npm: "@ai-sdk/openai-compatible",
+            models,
+          }
+          if (Object.keys(models).length === 0)
+            yield* cache.refresh("runware", rwOpts).pipe(Effect.ignore, Effect.forkDetach)
+        })
+
         if (!allowed) {
           yield* addApertis()
+          yield* addRunware()
           return providers
         }
 
@@ -100,6 +120,7 @@ export const layer: Layer.Layer<Service, never, Core.Service | Config.Service | 
         if (valid && !org && Object.keys(fetched).length === 0)
           yield* cache.refresh("kilo", fetch).pipe(Effect.ignore, Effect.forkDetach)
         yield* addApertis()
+        yield* addRunware()
         return providers
       })
 

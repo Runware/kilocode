@@ -310,3 +310,50 @@ it.live("does not resolve auth or config for unsupported providers", () =>
     expect(yield* Ref.get(hits)).toEqual([])
   }),
 )
+
+it.live("fetches Runware models with pricing and modalities", () =>
+  Effect.gen(function* () {
+    const hits = yield* Ref.make<Hit[]>([])
+    const http = HttpClient.make((request) =>
+      Effect.gen(function* () {
+        yield* Ref.update(hits, (list) => [...list, { url: request.url }])
+        return HttpClientResponse.fromWeb(
+          request,
+          Response.json({
+            data: [
+              {
+                id: "google-gemini-3-1-pro",
+                owned_by: "google",
+                name: "Google Gemini 3.1 Pro",
+                context_length: 1048576,
+                max_output_tokens: 65536,
+                input_modalities: ["text", "image", "video", "audio", "file"],
+                output_modalities: ["text"],
+                pricing: { prompt: "0.00000125", completion: "0.00001", input_cache_read: "0.000000125" },
+              },
+            ],
+          }),
+        )
+      }),
+    )
+    const models = yield* ModelCache.Service.use((cache) =>
+      cache.fetch("runware", { apiKey: "test-key", baseURL: "https://runware.test/v1" }),
+    ).pipe(
+      Effect.provide(
+        Layer.fresh(ModelCache.layer).pipe(
+          Layer.provide(Layer.succeed(HttpClient.HttpClient, http)),
+          Layer.provide(TestConfig.layer()),
+          Layer.provide(auth),
+          Layer.provide(ModelCache.kiloModelsLayer),
+        ),
+      ),
+    )
+
+    expect((yield* Ref.get(hits)).map((hit) => hit.url)).toEqual(["https://runware.test/v1/models"])
+    const model = models["google-gemini-3-1-pro"]
+    expect(model?.name).toBe("Google Gemini 3.1 Pro")
+    expect(model?.limit).toEqual({ context: 1048576, output: 65536 })
+    expect(model?.cost).toEqual({ input: 1.25, output: 10, cache_read: 0.125 })
+    expect(model?.modalities).toEqual({ input: ["text", "image", "video", "audio"], output: ["text"] })
+  }),
+)
